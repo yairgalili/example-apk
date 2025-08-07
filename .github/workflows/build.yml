@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - '**'
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0
   pull_request:
     branches:
       - '**'
@@ -12,49 +14,85 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
       - uses: expo/expo-github-action@v5
         with:
           expo-version: 3.x
-          
-      - name: Cache Gradle packages
+
+      - name: 📦 Cache Gradle packages
         uses: actions/cache@v3
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('/.gradle', '/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Install npm dependencies
-        run: npm install  --force
+      - name: 📥 Install npm dependencies
+        run: npm install --force
 
-      - name: List auth-related node modules
+      - name: 🔍 List auth-related node modules
         run: ls ./node_modules | grep coda-sdk || echo "No matching module found"
 
-      - name: Grant execute permission for gradlew
+      - name: 🔓 Grant execute permission for gradlew
         run: chmod +x ./android/gradlew
 
-      - name: create index.android.bundle
-        run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+      - name: 📦 Create index.android.bundle
+        run: npx react-native bundle \
+          --platform android \
+          --dev false \
+          --entry-file index.js \
+          --bundle-output android/app/src/main/assets/index.android.bundle \
+          --assets-dest android/app/src/main/res
 
-      - name: Build Android Release
+      - name: 🏗️ Build Android Release
         run: |
-          cd android && ./gradlew assembleRelease --build-cache 
-          # cd android && ./gradlew assembleRelease  --info --verbose --full-stacktrace --build-cache 
+          cd android && ./gradlew assembleRelease --build-cache
 
-      - name: Save Gradle problems report
-        if: always()  # Ensures this runs even if the build fails
+      - name: 🧾 Save Gradle problems report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gradle-problems-report
           path: android/build/reports/problems/problems-report.html
 
-      - name: Upload APK as artifact
+      - name: 🧪 Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release.apk
           path: android/app/build/outputs/apk/release/app-release.apk
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Download built APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release.apk
+          path: .
+
+      - name: 📦 Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: 🚀 Upload APK to GitHub Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./android/app/build/outputs/apk/release/app-release.apk
+          asset_name: app-release-${{ github.ref_name }}.apk
+          asset_content_type: application/vnd.android.package-archive
