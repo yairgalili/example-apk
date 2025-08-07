@@ -1,0 +1,60 @@
+name: React Native Android CI/CD
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: expo/expo-github-action@v5
+        with:
+          expo-version: 3.x
+          
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('/.gradle', '/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install npm dependencies
+        run: npm install  --force
+
+      - name: List auth-related node modules
+        run: ls ./node_modules | grep coda-sdk || echo "No matching module found"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./android/gradlew
+
+      - name: create index.android.bundle
+        run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+
+      - name: Build Android Release
+        run: |
+          cd android && ./gradlew assembleRelease --build-cache 
+          # cd android && ./gradlew assembleRelease  --info --verbose --full-stacktrace --build-cache 
+
+      - name: Save Gradle problems report
+        if: always()  # Ensures this runs even if the build fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-problems-report
+          path: android/build/reports/problems/problems-report.html
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
